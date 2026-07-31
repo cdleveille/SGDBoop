@@ -390,7 +390,6 @@ char* downloadAssetFile(char* app_id, char* url, char* type, char* orientation, 
 
 		// Rename the file to trigger a refresh on the client
 		if (!rename(outfilename_temp, outfilename)) {
-			free(outfilename);
 			free(outfilename_temp);
 			return outfilename;
 		}
@@ -1763,6 +1762,7 @@ int main(int argc, char** argv)
 
 			}
 
+			free(outfilename);
 			free(steamDestDir);
 		}
 
