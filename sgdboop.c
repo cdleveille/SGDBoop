@@ -209,6 +209,23 @@ void cleanupOldAssetFiles(const char* finalPath)
 	}
 }
 
+// Remove all non-standard hash-named image files from a librarycache/{appid}/ dir
+static void cleanupOldSteamIconFiles(const char* dirPath) {
+	struct dirent* d;
+	DIR* dr = opendir(dirPath);
+	if (dr == NULL) return;
+	while ((d = readdir(dr)) != NULL) {
+		const char* ext = strrchr(d->d_name, '.');
+		if (!ext) continue;
+		if (strcmp(ext, ".jpg") != 0 && strcmp(ext, ".jpeg") != 0 && strcmp(ext, ".png") != 0) continue;
+		if (strcmp(d->d_name, "header.jpg") == 0 || strcmp(d->d_name, "logo.png") == 0 || startsWith(d->d_name, "library_")) continue;
+		char filePath[MAX_PATH];
+		strcpy(filePath, dirPath);
+		strcat(filePath, d->d_name);
+		remove(filePath);
+	}
+	closedir(dr);
+}
 
 // Call the BOOP API
 char*** callAPI(char* grid_types, char* grid_ids, char* mode)
@@ -335,9 +352,39 @@ char* downloadAssetFile(char* app_id, char* url, char* type, char* orientation, 
 			strcat(outfilename, "_icon");
 
 		} else {
-			// Use hash for official Steam icons
+			// Find the existing Steam icon hash to overwrite; Steam looks up icons by hash from appinfo.vdf
+			char iconDir[MAX_PATH];
+			strcpy(iconDir, outfilename);
+			strcat(iconDir, "/");
+
+			char iconHash[MAX_PATH];
+			strcpy(iconHash, asset_hash); // default: use API hash
+
+			// Prefer an existing file whose name differs from the API hash (that's Steam's own hash)
+			struct dirent* de;
+			DIR* iconDr = opendir(iconDir);
+			if (iconDr != NULL) {
+				while ((de = readdir(iconDr)) != NULL) {
+					const char* de_ext = strrchr(de->d_name, '.');
+					if (!de_ext) continue;
+					if (strcmp(de_ext, ".jpg") != 0 && strcmp(de_ext, ".jpeg") != 0 && strcmp(de_ext, ".png") != 0) continue;
+					if (strcmp(de->d_name, "header.jpg") == 0 || strcmp(de->d_name, "logo.png") == 0 || startsWith(de->d_name, "library_")) continue;
+					char existingHash[MAX_PATH];
+					size_t hashLen = (size_t)(de_ext - de->d_name);
+					strncpy(existingHash, de->d_name, hashLen);
+					existingHash[hashLen] = '\0';
+					if (strcmp(existingHash, asset_hash) == 0) continue; // skip prior failed attempt
+					strcpy(iconHash, existingHash);
+					break;
+				}
+				closedir(iconDr);
+			}
+
+			// Remove all existing hash-named icons before saving the new one
+			cleanupOldSteamIconFiles(iconDir);
+
 			strcat(outfilename, "/");
-			strcat(outfilename, asset_hash);
+			strcat(outfilename, iconHash);
 		}
 	}
 
