@@ -12,7 +12,7 @@
 #include "gui-helper.h"
 #include "crc.h"
 
-#define VERSION "1.4.1" // this is also parsed by the makefile for dist
+#define VERSION "1.4.3" // this is also parsed by the makefile for dist
 #define API_VERSION "3"
 #define API_USER_AGENT "SGDBoop/v" VERSION
 
@@ -275,7 +275,7 @@ char*** callAPI(char* grid_types, char* grid_ids, char* mode)
 			strcat(message, s.ptr);
 
 			if (startsWith(s.ptr, "error-")) {
-				strreplace(message, "error-", " ");
+				message = strreplace(message, "error-", "");
 				ShowMessageBox("SGDBoop Error", message);
 			}
 			exitWithError(message, (int)http_code);
@@ -783,6 +783,12 @@ struct AppStruct* getSourceMods(const char* type)
 		return NULL;
 	}
 
+	char debug_message[1024];
+	if (DEBUG) {
+		sprintf(debug_message, "Opening mods path: %s\n", sourceModPath);
+		logMessage(debug_message, 0);
+	}
+
 	struct dirent* dir;
 	DIR* dr = opendir(sourceModPath);
 
@@ -831,12 +837,28 @@ struct AppStruct* getSourceMods(const char* type)
 
 		int foundGameKey = 0;
 
+		if (DEBUG) {
+			sprintf(debug_message, "Reading file: %s\n", filepath);
+			logMessage(debug_message, 0);
+		}
+
 		while ((read = readLine(&line, &len, fp)) != -1) {
 
 			// If line contains the "game" key, get the mod's name and create the struct entry
 			unsigned char* commentChar = strstr(line, "//");
 			unsigned char* nameStartChar = strstr_i(line, "game");
 			unsigned char* steamAppIdStartChar = strstr_i(line, "SteamAppId");
+
+
+			if (DEBUG && nameStartChar > 0) {
+				sprintf(debug_message, "Found nameStartChar: %s\n", nameStartChar);
+				logMessage(debug_message, 0);
+			}
+
+			if (DEBUG && steamAppIdStartChar > 0) {
+				sprintf(debug_message, "Found steamAppIdStartChar: %s\n", steamAppIdStartChar);
+				logMessage(debug_message, 0);
+			}
 
 			// Make sure to first capture the "game" key, properly
 			if (nameStartChar > 0 && commentChar == 0 && !foundGameKey && ((char *) nameStartChar == line || isspace(*(nameStartChar - 1))) && isspace(*(nameStartChar + 4))) {
@@ -920,6 +942,11 @@ struct AppStruct* getSourceMods(const char* type)
 
 	struct AppStruct* sourceMods = malloc(sizeof(AppStruct) * modsCount);
 
+	if (DEBUG) {
+		sprintf(debug_message, "Found %u mods inside getSourceMods(%s)\n", modsCount, type);
+		logMessage(debug_message, 0);
+	}
+
 	for (unsigned int i = 0; i < modsCount; i++) {
 		sourceMods[i].index = _modsCount;
 		char int_string[50];
@@ -990,26 +1017,29 @@ uint32_t* getOwnedAppids(unsigned int* count) {
 		fclose(fp);
 		const unsigned char* parsingChar = fileContent;
 		uint32_t appIdInt;
-		unsigned int totalAppidCount;
 		const unsigned char* appidBlockStart, *nextAppidBlock, *appId;
+		char message[512];
 
 		// Parse the vdf content
 		while ((size_t)(parsingChar - fileContent) < filesize) {
 
 			// Find appids block
-			appidBlockStart = sgdb_memmem(parsingChar, filesize - (parsingChar - fileContent), "appids\x00\x02\x30", 9) + 6;
+			appidBlockStart = sgdb_memmem(parsingChar, filesize - (parsingChar - fileContent), "appids\x00\x02\x30\x00", 10) + 7;
 			if ((size_t)(appidBlockStart - fileContent) > filesize) {
 				break;
 			}
-			nextAppidBlock = sgdb_memmem(appidBlockStart, filesize - (appidBlockStart - fileContent), "appids\x00\x02\x30", 9);
+			nextAppidBlock = sgdb_memmem(appidBlockStart, filesize - (appidBlockStart - fileContent), "appids\x00\x02\x30\x00", 10);
 			if (nextAppidBlock - fileContent > filesize) {
 				nextAppidBlock = fileContent + filesize;
 			}
 
-			unsigned int currentAppidCount = 0;
+			unsigned int appIdCount = 0;
+			unsigned char appIdIndex[10];
+
 			appId = appidBlockStart;
-			while (appId[0] == 0x00 && appId[1] == 0x02 && appId[2] == 0x30 + currentAppidCount && appId[3] == 0x00) {
-				appId += 4;
+			while (appId[0] == 0x02 && sprintf(appIdIndex, "%d", appIdCount) && startsWith((appId + 1), appIdIndex)) {
+
+				appId += 2 + strlen(appIdIndex);
 				appIdInt = (uint32_t)appId[0] |
 					((uint32_t)appId[1] << 8) |
 					((uint32_t)appId[2] << 16) |
@@ -1019,13 +1049,24 @@ uint32_t* getOwnedAppids(unsigned int* count) {
 				ownedAppids[(*count)++] = appIdInt;
 
 				appId += 4;
-				currentAppidCount++;
+				appIdCount++;
+
+				if (DEBUG) {
+					sprintf(message, "Found owned AppID: %d\n", appIdInt);
+					logMessage(message, 0);
+				}
 			}
 
 			parsingChar = nextAppidBlock;
 		}
 
 		free(fileContent);
+	}
+
+	if (DEBUG) {
+		char message[512];
+		sprintf(message, "Total owned apps: %d\n", *count);
+		logMessage(message, 0);
 	}
 
 	return ownedAppids;
@@ -1071,7 +1112,8 @@ struct AppStruct* getSteamApps() {
 		const unsigned char* parsingChar = fileContent;
 		uint32_t appIdInt;
 		unsigned char appidString[32];
-		const unsigned char *appIdStart, *appIdEnd, *appNameStart, *nextAppId, *gameTypeMatch;
+		const unsigned char *appIdStart, *appIdEnd, *appNameStart, * appStoreName, *nextAppId, *gameTypeMatch;
+		char message[1024];
 
 		// Parse the vdf content
 		while ((size_t)(parsingChar - fileContent) < filesize) {
@@ -1099,9 +1141,14 @@ struct AppStruct* getSteamApps() {
 			}
 
 			// Check if it's game type
-			gameTypeMatch = sgdb_memmem(appNameStart, nextAppId - appNameStart, "\x00\x01\x05\x00\x00\x00game", 9) + 9;
+			gameTypeMatch = sgdb_memmem(appNameStart, nextAppId - appNameStart, "\x01\x05\x00\x00\x00game", 9) + 9;
 			if (gameTypeMatch > nextAppId || (size_t)gameTypeMatch == 9) {
-				gameTypeMatch = sgdb_memmem(appNameStart, nextAppId - appNameStart, "\x00\x01\x05\x00\x00\x00Game", 9) + 9;
+				gameTypeMatch = sgdb_memmem(appNameStart, nextAppId - appNameStart, "\x01\x05\x00\x00\x00Game", 9) + 9;
+			}
+
+			appStoreName = sgdb_memmem(appNameStart, nextAppId - appNameStart, "\x07\x02\x00\x00\x01\x91\x01\x00\x00", 9) + 9;
+			if ((size_t)appStoreName != 9 && appStoreName < nextAppId) {
+				appNameStart = appStoreName;
 			}
 
 			if (gameTypeMatch < nextAppId && (size_t)gameTypeMatch != 9) {
@@ -1127,6 +1174,11 @@ struct AppStruct* getSteamApps() {
 					strcpy(apps[_steamAppsCount].appid_old, appidString);
 					strcpy(apps[_steamAppsCount].type, "steam-app");
 					++_steamAppsCount;
+
+					if (DEBUG) {
+						sprintf(message, "Found app: [%s] \"%s\"\n", appidString, appNameStart);
+						logMessage(message, 0);
+					}
 				}
 			}
 
@@ -1272,10 +1324,27 @@ struct AppStruct* getNonSteamApps() {
 }
 
 struct AppStruct* getMods() {
+	if (DEBUG) logMessage("Running getSourceMods(\"source\")", 0);
 	struct AppStruct* sourceMods = getSourceMods("source");
+
+	if (DEBUG) logMessage("Running getSourceMods(\"goldsource\")", 0);
 	struct AppStruct* goldSourceMods = getSourceMods("goldsource");
+
 	struct AppStruct* apps = malloc(sizeof(AppStruct) * (_sourceModsCount + _goldSourceModsCount));
+
+	char debug_message[1024];
+	if (DEBUG) {
+		sprintf(debug_message, "Found %u source mods and %u goldsrc mods\n", _sourceModsCount, _goldSourceModsCount);
+		logMessage(debug_message, 0);
+	}
+
 	for (unsigned int i = 0; i < _sourceModsCount; i++) {
+
+		if (DEBUG) {
+			sprintf(debug_message, "Adding source mod #%u: %s\n", i, sourceMods[i].name);
+			logMessage(debug_message, 0);
+		}
+
 		apps[_modsCount].index = _modsCount;
 		strcpy(apps[_modsCount].name, sourceMods[i].name);
 		strcpy(apps[_modsCount].appid_old, sourceMods[i].appid_old);
@@ -1285,6 +1354,12 @@ struct AppStruct* getMods() {
 		_modsCount++;
 	}
 	for (unsigned int i = 0; i < _goldSourceModsCount; i++) {
+
+		if (DEBUG) {
+			sprintf(debug_message, "Adding source mod #%u: %s\n", i, sourceMods[i].name);
+			logMessage(debug_message, 0);
+		}
+
 		apps[_modsCount].index = _modsCount;
 		strcpy(apps[_modsCount].name, goldSourceMods[i].name);
 		strcpy(apps[_modsCount].appid_old, goldSourceMods[i].appid_old);
