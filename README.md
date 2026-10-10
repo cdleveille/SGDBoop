@@ -35,7 +35,8 @@ Or run `flatpak install flathub com.steamgriddb.SGDBoop`
 2.
    ```Shell
    git clone https://github.com/SteamGridDB/SGDBoop.git
-   sudo make install -C SGDBoop
+   cd SGDBoop
+   sudo make install -C .
    ```
 
 </details>

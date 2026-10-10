@@ -111,7 +111,8 @@ bld/
 
 dist/
 
-./SGDBoop # linux binary
+# linux binary
+/SGDBoop
 
 .DS_Store
 /settings.VisualStudio.json
