@@ -12,7 +12,7 @@
 #include "gui-helper.h"
 #include "crc.h"
 
-#define VERSION "1.4.3" // this is also parsed by the makefile for dist
+#define VERSION "1.4.4" // this is also parsed by the makefile for dist
 #define API_VERSION "3"
 #define API_USER_AGENT "SGDBoop/v" VERSION
 
@@ -440,6 +440,8 @@ char* downloadAssetFile(char* app_id, char* url, char* type, char* orientation, 
 			free(outfilename_temp);
 			return outfilename;
 		}
+
+		free(outfilename_temp);
 	}
 
 	free(outfilename);
@@ -861,9 +863,12 @@ struct AppStruct* getSourceMods(const char* type)
 			}
 
 			// Make sure to first capture the "game" key, properly
-			if (nameStartChar > 0 && commentChar == 0 && !foundGameKey && ((char *) nameStartChar == line || isspace(*(nameStartChar - 1))) && isspace(*(nameStartChar + 4))) {
+			if (nameStartChar > 0 && commentChar == 0 && !foundGameKey && ((char *) nameStartChar == line || isspace(*(nameStartChar - 1)) || *(nameStartChar - 1) == '"') && (isspace(*(nameStartChar + 4)) || *(nameStartChar + 4) == '"')) {
 
-				nameStartChar = strstr(line, "\"") + 1;
+				nameStartChar = strstr(nameStartChar + 5, "\"") + 1;
+				if (nameStartChar == 1) {
+					continue;
+				}
 				unsigned char* nameEndChar = strstr(nameStartChar, "\"");
 				*nameEndChar = '\0';
 
